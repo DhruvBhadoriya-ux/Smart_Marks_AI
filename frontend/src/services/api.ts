@@ -150,4 +150,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  processScanImage: async (formData: FormData): Promise<any> => {
+    const response = await fetch('/api/v1/ocr/process', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      let errorDetail = 'Failed to process scan image';
+      try {
+        const errJson = await response.json();
+        errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson);
+      } catch {
+        errorDetail = `HTTP ${response.status} ${response.statusText}`;
+      }
+      throw new Error(errorDetail);
+    }
+    return response.json();
+  },
 };

@@ -49,6 +49,10 @@ app.add_middleware(
 # Include API v1 Router
 app.include_router(api_v1_router)
 
+# Route alias for /api/scans/process
+from app.api.v1.ocr import process_marks_strip
+app.add_api_route("/api/scans/process", process_marks_strip, methods=["POST"], tags=["Scans"])
+
 
 @app.get("/", tags=["Root"])
 def root():

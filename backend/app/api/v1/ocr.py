@@ -41,11 +41,22 @@ async def process_marks_strip(
             detail=f"Examination session '{exam_id}' does not exist."
         )
 
-    # 2. Read image bytes
+    # 2. Validate file type and read image bytes
+    ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg", "image/bmp", "application/octet-stream"]
+    if file.content_type and file.content_type.lower() not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file format '{file.content_type}'. Please upload a JPG, PNG, or WebP image."
+        )
+
     try:
         image_bytes = await file.read()
         if len(image_bytes) == 0:
-            raise ValueError("Uploaded file is empty.")
+            raise ValueError("Uploaded image file is empty.")
+        if len(image_bytes) > 15 * 1024 * 1024:
+            raise ValueError("Uploaded image exceeds the 15MB maximum size limit.")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
