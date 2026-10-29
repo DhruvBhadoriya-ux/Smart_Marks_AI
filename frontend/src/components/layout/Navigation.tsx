@@ -5,6 +5,7 @@ import {
   Scan,
   Users,
   Activity,
+  Download,
   Award,
   ChevronRight,
   ShieldCheck,
@@ -12,7 +13,7 @@ import {
   X
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'exams' | 'scan' | 'students' | 'activity';
+export type TabType = 'dashboard' | 'exams' | 'scan' | 'students' | 'export' | 'activity';
 
 interface NavigationProps {
   activeTab: TabType;
@@ -32,6 +33,7 @@ export const Navigation: React.FC<NavigationProps> = ({
     { id: 'exams' as TabType, label: 'Examinations', icon: FileSpreadsheet },
     { id: 'scan' as TabType, label: 'Scan & Digitization', icon: Scan },
     { id: 'students' as TabType, label: 'Students', icon: Users },
+    { id: 'export' as TabType, label: 'Export Records', icon: Download },
     { id: 'activity' as TabType, label: 'Activity Logs', icon: Activity },
   ];
 

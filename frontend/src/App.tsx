@@ -6,6 +6,7 @@ import { ExamCreateModal } from './components/exams/ExamCreateModal';
 import { StudentManagement } from './components/students/StudentManagement';
 import { RecentActivityPanel } from './components/activity/RecentActivityPanel';
 import { ScanMarksView } from './components/camera/ScanMarksView';
+import { ExportView } from './components/export/ExportView';
 import { api } from './services/api';
 import {
   DashboardSummary,
@@ -172,6 +173,15 @@ export const App: React.FC = () => {
             loading={loading}
             onRefresh={loadAllData}
             onCreateStudent={handleCreateStudent}
+          />
+        )}
+
+        {activeTab === 'export' && (
+          <ExportView
+            exams={exams}
+            selectedExam={selectedExam}
+            onSelectExam={setSelectedExam}
+            onOpenCreateExam={() => setIsCreateModalOpen(true)}
           />
         )}
 

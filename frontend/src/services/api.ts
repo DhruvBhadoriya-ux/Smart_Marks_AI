@@ -86,4 +86,68 @@ export const api = {
   // Activity
   getRecentActivities: (limit = 20) =>
     request<AuditEvent[]>(`/activity?limit=${limit}`),
+
+  // Marks Records & Verification
+  getExamMarksRecords: (examId: string, statusFilter?: string) => {
+    const qs = statusFilter ? `?status_filter=${statusFilter}` : '';
+    return request<any[]>(`/marks/${examId}${qs}`);
+  },
+
+  approveMarksRecord: (recordId: string, notes?: string) =>
+    request<any>(`/marks/record/${recordId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ faculty_id: 'FAC001', approval_notes: notes }),
+    }),
+
+  updateMarksRecord: (recordId: string, scores: any[], studentId?: string, reason?: string) =>
+    request<any>(`/marks/record/${recordId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        scores,
+        student_id: studentId,
+        faculty_id: 'FAC001',
+        reason: reason || 'Manual correction during faculty review',
+      }),
+    }),
+
+  // Export & OneDrive
+  getExportPreview: (examId: string) =>
+    request<{
+      exam_id: string;
+      subject_code: string;
+      subject_name: string;
+      exam_type: string;
+      total_records: number;
+      approved_records: number;
+      pending_records: number;
+      questions_count: number;
+      total_marks: number;
+      suggested_filename: string;
+      microsoft_integration_configured: boolean;
+    }>(`/export/preview/${examId}`),
+
+  getDownloadExcelUrl: (examId: string, onlyApproved: boolean = true) =>
+    `/api/v1/export/excel/${examId}?only_approved=${onlyApproved}`,
+
+  getOneDriveAuthUrl: (state?: string) => {
+    const qs = state ? `?state=${encodeURIComponent(state)}` : '';
+    return request<{ configured: boolean; auth_url?: string; message?: string }>(
+      `/export/onedrive/auth-url${qs}`
+    );
+  },
+
+  uploadToOneDrive: (payload: {
+    exam_id: string;
+    access_token: string;
+    only_approved?: boolean;
+    folder_name?: string;
+  }) =>
+    request<{
+      success: boolean;
+      message: string;
+      onedrive_result: any;
+    }>('/export/onedrive/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
