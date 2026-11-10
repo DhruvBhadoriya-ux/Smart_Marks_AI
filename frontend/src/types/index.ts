@@ -57,12 +57,14 @@ export type VerificationStatus = 'PENDING_REVIEW' | 'NEEDS_CORRECTION' | 'APPROV
 export interface QuestionScore {
   question_id: string;
   display_name: string;
-  obtained_marks: number;
+  obtained_marks: number | null;
   max_marks: number;
   confidence: number;
   is_flagged: boolean;
+  is_unrecognized?: boolean;
   is_manually_edited: boolean;
   flag_reason?: string | null;
+  cell_box?: number[] | null;
 }
 
 export interface EditHistoryEntry {
@@ -80,9 +82,9 @@ export interface MarksRecord {
   student_id: string;
   student_name?: string;
   scores: QuestionScore[];
-  total_obtained: number;
+  total_obtained: number | null;
   total_max: number;
-  percentage: number;
+  percentage: number | null;
   status: VerificationStatus;
   scan_image_path?: string | null;
   approved_by?: string | null;

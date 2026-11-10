@@ -1,4 +1,11 @@
-import io
+import sys
+from pathlib import Path
+
+# Ensure backend root is on sys.path
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import cv2
 import numpy as np
 import pytest
@@ -10,8 +17,6 @@ from app.services.image_processing import (
     preprocess_marks_strip,
     order_points,
     four_point_transform,
-    detect_document_contour,
-    load_image_from_bytes,
 )
 from app.services.ocr.base import OCRRawResult
 from app.services.ocr.factory import get_ocr_engine
@@ -46,7 +51,8 @@ def create_synthetic_marksheet_image(include_text: bool = True) -> bytes:
         cv2.putText(img, "Q3 : 9.5", (25, 225), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
         cv2.putText(img, "TOTAL : 25.0", (25, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-    _, encoded = cv2.imencode(".jpg", img)
+    ret, encoded = cv2.imencode(".jpg", img)
+    assert ret is True and encoded is not None
     return encoded.tobytes()
 
 
@@ -70,6 +76,11 @@ def test_four_point_transform_ordering():
     assert np.allclose(ordered[1], [200, 0])
     assert np.allclose(ordered[2], [200, 200])
     assert np.allclose(ordered[3], [0, 200])
+
+    # Test four_point_transform
+    dummy_img = np.zeros((300, 300, 3), dtype=np.uint8)
+    warped = four_point_transform(dummy_img, pts)
+    assert warped.shape[0] > 0 and warped.shape[1] > 0
 
 
 def test_swappable_ocr_factory():
@@ -126,10 +137,12 @@ def test_marks_validator_bounds_and_flags():
 
     # Q2 should be flagged for exceeding max marks
     assert scores_by_id["Q2"].is_flagged is True
+    assert scores_by_id["Q2"].flag_reason is not None
     assert "exceeds maximum allowed" in scores_by_id["Q2"].flag_reason
 
     # Q3 should be flagged for low confidence
     assert scores_by_id["Q3"].is_flagged is True
+    assert scores_by_id["Q3"].flag_reason is not None
     assert "Low OCR confidence" in scores_by_id["Q3"].flag_reason
 
 
@@ -183,3 +196,8 @@ def test_rapid_ocr_inference_on_synthetic_image():
         assert isinstance(item, OCRRawResult)
         assert item.confidence >= 0.0
         assert len(item.text) > 0
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+

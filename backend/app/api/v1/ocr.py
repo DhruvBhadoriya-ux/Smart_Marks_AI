@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 from fastapi.responses import FileResponse
 
@@ -10,7 +10,6 @@ from app.core.database import get_db
 from app.services.image_processing import preprocess_marks_strip
 from app.services.ocr.factory import get_ocr_engine
 from app.services.marks_validator import align_and_validate_marks
-from app.schemas.marks import MarksRecordResponse, VerificationStatus, QuestionScore
 
 router = APIRouter(prefix="/ocr", tags=["Computer Vision & OCR"])
 
@@ -79,15 +78,50 @@ async def process_marks_strip(
     ocr_engine = get_ocr_engine(engine)
     raw_tokens = ocr_engine.extract(cv_result["image_array"])
 
-    # 5. Pattern Alignment & Bounds Validation
+    # Extract header tokens from dedicated crop if available
+    table_data = cv_result.get("table_data", {})
+    header_crop = table_data.get("header_crop")
+    header_tokens = []
+    if header_crop is not None and header_crop.size > 0:
+        try:
+            header_tokens = ocr_engine.extract(header_crop)
+        except Exception:
+            header_tokens = []
+
+    # Retrieve registered students for this session / college directory
+    registered_docs = list(db.students.find({}, {"student_id": 1, "name": 1, "_id": 0}))
+    registered_ids = [d["student_id"] for d in registered_docs]
+
+    # 5. Multi-Strategy Pattern Alignment & Bounds Validation
     validated = align_and_validate_marks(
         ocr_results=raw_tokens,
         configured_questions=exam.get("questions", []),
+        header_ocr_results=header_tokens,
+        table_data=table_data,
+        ocr_engine=ocr_engine,
+        registered_students=registered_ids,
         confidence_threshold=settings.OCR_CONFIDENCE_THRESHOLD
     )
 
+    # Integrate image quality assessment flags
+    quality = cv_result.get("quality", {})
+    if quality.get("flags"):
+        for q_flag in quality["flags"]:
+            if q_flag == "IMAGE_TOO_BLURRED":
+                validated["has_flags"] = True
+                validated["warning_messages"].insert(0, "Image is heavily blurred. Accuracy is degraded; retake recommended.")
+            elif q_flag == "IMAGE_BLURRED":
+                validated["has_flags"] = True
+                validated["warning_messages"].insert(0, "Image has mild blur / soft focus. Please verify extracted marks against scan.")
+            elif q_flag == "IMAGE_TOO_SMALL":
+                validated["has_flags"] = True
+                validated["warning_messages"].insert(0, "Image resolution is low. Position camera closer to marks strip.")
+            elif q_flag == "IMAGE_TOO_DARK":
+                validated["warning_messages"].append("Low ambient lighting detected. Ensure even document illumination.")
+
     # Use student override if provided, else extracted candidate
-    effective_student_id = (student_id_override or validated["candidate_student_id"]).strip().upper()
+    override = student_id_override.strip().upper() if student_id_override and student_id_override.strip() else None
+    effective_student_id = override or validated.get("candidate_student_id") or "UNKNOWN"
 
     # Look up student name from directory if exists
     student_name = "Unknown Student"
@@ -97,6 +131,11 @@ async def process_marks_strip(
 
     # 6. Generate Record ID and persist draft in MongoDB
     record_id = f"REC-{exam.get('subject_code', 'SUB')}-{uuid.uuid4().hex[:6].upper()}"
+
+    # If student is already scanned for this exam, reuse their record_id and original created_at
+    existing_record = db.marks_records.find_one({"exam_id": exam_id, "student_id": effective_student_id}) if effective_student_id != "UNKNOWN" else None
+    if existing_record:
+        record_id = existing_record.get("record_id", record_id)
 
     record_doc = {
         "record_id": record_id,
@@ -112,17 +151,25 @@ async def process_marks_strip(
         "scan_filename": cv_result["filename"],
         "approved_by": None,
         "approved_at": None,
-        "edit_history": [],
-        "created_at": now,
+        "edit_history": existing_record.get("edit_history", []) if existing_record else [],
+        "created_at": existing_record.get("created_at", now) if existing_record else now,
         "updated_at": now,
     }
 
-    # Upsert to prevent duplicate import conflicts
-    db.marks_records.update_one(
-        {"exam_id": exam_id, "student_id": effective_student_id},
-        {"$set": record_doc},
-        upsert=True
-    )
+    # Upsert to prevent duplicate import conflicts (or insert if student ID is UNKNOWN)
+    if existing_record:
+        db.marks_records.update_one(
+            {"_id": existing_record["_id"]},
+            {"$set": record_doc}
+        )
+    elif effective_student_id != "UNKNOWN":
+        db.marks_records.update_one(
+            {"exam_id": exam_id, "student_id": effective_student_id},
+            {"$set": record_doc},
+            upsert=True
+        )
+    else:
+        db.marks_records.insert_one(record_doc)
 
     # Log audit event
     db.audit_events.insert_one({
@@ -155,6 +202,9 @@ async def process_marks_strip(
         "scan_image_url": f"/api/v1/ocr/scans/{cv_result['filename']}",
         "ocr_engine": ocr_engine.name,
         "perspective_corrected": cv_result["perspective_corrected"],
+        "table_detected": table_data.get("table_found", False),
+        "quality_assessment": quality,
+        "registered_students": registered_docs,
         "has_flags": validated["has_flags"],
         "warning_messages": validated["warning_messages"],
         "raw_tokens_count": len(raw_tokens),

@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import mongomock
@@ -28,7 +28,7 @@ class Database:
             self.db = self.client[settings.MONGODB_DB_NAME]
             self.is_mock = False
             logger.info("Connected successfully to MongoDB at %s (Database: %s)", settings.MONGODB_URI, settings.MONGODB_DB_NAME)
-        except (ConnectionFailure, ServerSelectionTimeoutError, Exception) as err:
+        except (ConnectionFailure, Exception) as err:
             logger.warning(
                 "MongoDB not reachable (%s). Falling back to mongomock for local development/testing.",
                 str(err)
@@ -51,10 +51,12 @@ class Database:
             self.db.students.create_index([("student_id", ASCENDING)], unique=True)
             self.db.students.create_index([("semester", ASCENDING), ("branch", ASCENDING)])
 
-            # Marks records: unique per student and exam
+            # Marks records: unique record_id and unique per student/exam (excluding UNKNOWN pending review)
+            self.db.marks_records.create_index([("record_id", ASCENDING)], unique=True)
             self.db.marks_records.create_index(
                 [("exam_id", ASCENDING), ("student_id", ASCENDING)],
-                unique=True
+                unique=True,
+                partialFilterExpression={"student_id": {"$ne": "UNKNOWN"}}
             )
             self.db.marks_records.create_index([("status", ASCENDING)])
 
@@ -125,7 +127,8 @@ class Database:
 
 db_instance = Database()
 
-def get_db():
+def get_db() -> Any:
     if db_instance.db is None:
         db_instance.connect()
     return db_instance.db
+

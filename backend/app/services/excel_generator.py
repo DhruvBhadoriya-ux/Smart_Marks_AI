@@ -1,6 +1,6 @@
 import io
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -18,6 +18,8 @@ def generate_exam_excel_workbook(
     """
     wb = openpyxl.Workbook()
     ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet()
     ws.title = f"{exam.get('subject_code', 'EXAM')}_Marks"
     ws.views.sheetView[0].showGridLines = True
 
@@ -124,9 +126,9 @@ def generate_exam_excel_workbook(
         is_alt = (s_no % 2 == 0)
         row_fill = ALT_ROW_FILL if is_alt else None
 
-        # Build score lookup by question_id
+        # Build score lookup by question_id (preserve None for unread/unassigned marks)
         score_map = {
-            s.get("question_id"): s.get("obtained_marks", 0.0)
+            s.get("question_id"): s.get("obtained_marks")
             for s in record.get("scores", [])
         }
 
@@ -155,22 +157,31 @@ def generate_exam_excel_workbook(
         col_offset = 4
         for q in questions:
             qid = q.get("question_id")
-            val = score_map.get(qid, 0.0)
-            cq = ws.cell(row=current_row, column=col_offset, value=float(val))
-            cq.alignment = ALIGN_RIGHT
+            val = score_map.get(qid)
+            if val is not None:
+                cq = ws.cell(row=current_row, column=col_offset, value=float(val))
+                cq.alignment = ALIGN_RIGHT
+                cq.number_format = "0.0"
+            else:
+                cq = ws.cell(row=current_row, column=col_offset, value="—")
+                cq.alignment = ALIGN_CENTER
             cq.font = FONT_DATA
-            cq.number_format = "0.0"
             cq.border = CELL_BORDER
             if row_fill: cq.fill = row_fill
             col_offset += 1
 
         # Total Obtained
-        tot_obtained = float(record.get("total_obtained", 0.0))
-        scores_for_stats.append(tot_obtained)
-        c_tot = ws.cell(row=current_row, column=col_offset, value=tot_obtained)
-        c_tot.alignment = ALIGN_RIGHT
+        raw_tot = record.get("total_obtained")
+        if raw_tot is not None:
+            tot_obtained = float(raw_tot)
+            scores_for_stats.append(tot_obtained)
+            c_tot = ws.cell(row=current_row, column=col_offset, value=tot_obtained)
+            c_tot.alignment = ALIGN_RIGHT
+            c_tot.number_format = "0.0"
+        else:
+            c_tot = ws.cell(row=current_row, column=col_offset, value="—")
+            c_tot.alignment = ALIGN_CENTER
         c_tot.font = FONT_BOLD
-        c_tot.number_format = "0.0"
         c_tot.border = CELL_BORDER
         if row_fill: c_tot.fill = row_fill
         col_offset += 1
@@ -186,11 +197,16 @@ def generate_exam_excel_workbook(
         col_offset += 1
 
         # Percentage
-        pct = float(record.get("percentage", 0.0))
-        c_pct = ws.cell(row=current_row, column=col_offset, value=pct / 100.0)
-        c_pct.alignment = ALIGN_RIGHT
+        raw_pct = record.get("percentage")
+        if raw_pct is not None:
+            pct = float(raw_pct)
+            c_pct = ws.cell(row=current_row, column=col_offset, value=pct / 100.0)
+            c_pct.alignment = ALIGN_RIGHT
+            c_pct.number_format = "0.0%"
+        else:
+            c_pct = ws.cell(row=current_row, column=col_offset, value="—")
+            c_pct.alignment = ALIGN_CENTER
         c_pct.font = FONT_DATA
-        c_pct.number_format = "0.0%"
         c_pct.border = CELL_BORDER
         if row_fill: c_pct.fill = row_fill
         col_offset += 1
@@ -261,11 +277,13 @@ def generate_exam_excel_workbook(
 
     # 7. Auto-Fit Column Widths
     for col in ws.columns:
-        col_letter = get_column_letter(col[0].column)
+        if not col or col[0].column is None:
+            continue
+        col_letter = get_column_letter(int(col[0].column))
         max_len = 0
         for cell in col:
             # Skip merged title row in width calculation
-            if cell.row == 1 or cell.row > current_row - 2:
+            if cell.row is not None and (cell.row == 1 or cell.row > current_row - 2):
                 continue
             if cell.value:
                 max_len = max(max_len, len(str(cell.value)))

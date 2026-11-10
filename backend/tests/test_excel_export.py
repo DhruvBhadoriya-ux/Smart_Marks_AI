@@ -1,4 +1,11 @@
-import io
+import sys
+from pathlib import Path
+
+# Ensure backend root is on sys.path
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
@@ -6,7 +13,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.database import db_instance, get_db
 from app.services.excel_generator import generate_exam_excel_workbook
-from app.services.ms_graph import ms_graph_service
 
 client = TestClient(app)
 
@@ -92,6 +98,7 @@ def test_openpyxl_workbook_generation():
     # Load back with openpyxl to verify cell structure
     wb = openpyxl.load_workbook(buffer)
     ws = wb.active
+    assert ws is not None
     assert ws.title == "CS301_Marks"
 
     # Verify Title Banner
@@ -145,3 +152,8 @@ def test_onedrive_auth_url_and_fallback():
     # If not configured, should return fallback message
     if not data["configured"]:
         assert "not configured" in data.get("message", "").lower()
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+

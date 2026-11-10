@@ -1,0 +1,9 @@
+project-includes = ["backend"]
+project-excludes = [
+    "**/node_modules",
+    "backend/.venv",
+]
+search-path = ["backend"]
+python-interpreter-path = "backend/.venv/bin/python"
+python-platform = "darwin"
+python-version = "3.11.0"

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pymongo import ASCENDING
 
@@ -16,7 +16,7 @@ def list_students(
     branch: Optional[str] = None
 ):
     db = get_db()
-    query = {}
+    query: Dict[str, Any] = {}
     if semester:
         query["semester"] = semester
     if branch:

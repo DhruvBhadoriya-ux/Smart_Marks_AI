@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import db_instance
@@ -49,9 +48,10 @@ app.add_middleware(
 # Include API v1 Router
 app.include_router(api_v1_router)
 
-# Route alias for /api/scans/process
-from app.api.v1.ocr import process_marks_strip
+# Route aliases for /api/scans
+from app.api.v1.ocr import process_marks_strip, get_scan_image
 app.add_api_route("/api/scans/process", process_marks_strip, methods=["POST"], tags=["Scans"])
+app.add_api_route("/api/scans/{filename}", get_scan_image, methods=["GET"], tags=["Scans"])
 
 
 @app.get("/", tags=["Root"])
@@ -63,3 +63,9 @@ def root():
         "health_check": "/api/v1/health",
         "status": "operational"
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+

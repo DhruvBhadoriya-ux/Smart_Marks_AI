@@ -1,10 +1,9 @@
 import os
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import msal
 import httpx
 
-from app.core.config import settings
 
 logger = logging.getLogger("smartmarks.ms_graph")
 

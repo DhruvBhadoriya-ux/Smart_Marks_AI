@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -20,11 +20,9 @@ class BaseOCREngine(ABC):
     @abstractmethod
     def name(self) -> str:
         """Returns the human-readable identifier of the engine."""
-        pass
 
     @abstractmethod
     def extract(self, image: np.ndarray) -> List[OCRRawResult]:
         """
         Accept an image as a numpy array (BGR or Grayscale) and return list of recognized OCRRawResults.
         """
-        pass

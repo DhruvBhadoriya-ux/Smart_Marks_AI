@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pymongo import DESCENDING
 
@@ -17,7 +17,7 @@ def list_exams(
     subject_code: Optional[str] = None
 ):
     db = get_db()
-    query = {}
+    query: Dict[str, Any] = {}
     if exam_type:
         query["exam_type"] = exam_type.value
     if semester:

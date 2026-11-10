@@ -1,0 +1,16 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Darwin",
+  "extraPaths": [
+    "."
+  ],
+  "include": [
+    "app",
+    "tests"
+  ],
+  "exclude": [
+    ".venv"
+  ]
+}

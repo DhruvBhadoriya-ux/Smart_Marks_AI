@@ -239,7 +239,7 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
       const result = await api.processScanImage(formData);
       setScanResult(result);
       setEditableScores(result.scores || []);
-      setEditableStudentId(result.student_id || '');
+      setEditableStudentId(result.student_id === 'UNKNOWN' ? '' : (result.student_id || ''));
       setScannerState('verified');
     } catch (err: any) {
       console.error('OCR processing failure:', err);
@@ -249,37 +249,63 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
   };
 
   // Faculty verification field edit
-  const handleScoreChange = (index: number, newScore: number) => {
+  const handleScoreChange = (index: number, newScore: number | null) => {
     const updated = [...editableScores];
+    const max = updated[index].max_marks;
+    const isInvalid = newScore !== null && (newScore > max || newScore < 0);
     updated[index] = {
       ...updated[index],
       obtained_marks: newScore,
       is_manually_edited: true,
-      is_flagged: newScore > updated[index].max_marks || newScore < 0,
+      is_unrecognized: newScore === null,
+      is_flagged: isInvalid || newScore === null,
       flag_reason:
-        newScore > updated[index].max_marks
-          ? `Score (${newScore}) exceeds question max (${updated[index].max_marks})`
+        newScore === null
+          ? 'Score is missing. Please enter marks.'
+          : newScore > max
+          ? `Score (${newScore}) exceeds question max (${max})`
+          : newScore < 0
+          ? 'Score cannot be negative'
           : null,
     };
     setEditableScores(updated);
   };
 
-  // Total calculated from edited scores
-  const currentTotalObtained = editableScores.reduce(
-    (sum, s) => sum + (Number(s.obtained_marks) || 0),
-    0
+  // Check if all question scores are verified valid numbers
+  const allScoresPresent = editableScores.length > 0 && editableScores.every(
+    (s) => s.obtained_marks !== null && !isNaN(Number(s.obtained_marks))
   );
+
+  // Total calculated from edited scores (only when all scores are present)
+  const currentTotalObtained = allScoresPresent
+    ? Math.round(
+        editableScores.reduce((sum, s) => sum + (Number(s.obtained_marks) || 0), 0) * 100
+      ) / 100
+    : null;
+
+  // Student selection from registered list
+  const handleStudentSelect = (selectedId: string) => {
+    setEditableStudentId(selectedId);
+  };
 
   // Faculty approval action
   const handleApproveRecord = async () => {
     if (!scanResult) return;
+    if (!editableStudentId || editableStudentId === 'UNKNOWN') {
+      setProcessError('Please select or enter a valid Student Enrollment ID before approval.');
+      return;
+    }
+    if (!allScoresPresent) {
+      setProcessError('Please enter valid numeric marks for all questions before approving.');
+      return;
+    }
     try {
       setApproving(true);
-      // Update any modified scores first
+      const cleanStudentId = editableStudentId.trim().toUpperCase();
       await api.updateMarksRecord(
         scanResult.record_id,
         editableScores,
-        editableStudentId,
+        cleanStudentId,
         'Faculty verified scan and approved record'
       );
       // Finalize approval
@@ -291,6 +317,7 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
       setApproving(false);
     }
   };
+
 
   // Reset to scan another marksheet
   const handleScanNext = () => {
@@ -642,13 +669,19 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
                 <>
                   {/* Anomaly / Quality Flags Banner */}
                   {scanResult.has_flags && (
-                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start space-x-2.5">
-                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold">Faculty Review Required:</span>
-                        <p className="text-amber-800 text-[11px] mt-0.5">
-                          Certain recognized fields require manual verification before final sign-off. Please check the highlighted inputs below against the scan crop.
-                        </p>
+                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1.5">
+                      <div className="flex items-center space-x-2 font-bold text-amber-900">
+                        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                        <span>Faculty Review Required:</span>
+                      </div>
+                      <div className="pl-6 space-y-1 text-amber-800 text-[11px]">
+                        {scanResult.warning_messages && scanResult.warning_messages.length > 0 ? (
+                          scanResult.warning_messages.map((msg: string, i: number) => (
+                            <p key={i}>• {msg}</p>
+                          ))
+                        ) : (
+                          <p>• Certain recognized fields require manual verification before final sign-off.</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -662,11 +695,18 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
                           <Eye className="h-3.5 w-3.5 text-blue-600" />
                           <span>Rectified Marks Strip Scan</span>
                         </span>
-                        {scanResult.perspective_corrected && (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
-                            OpenCV Deskewed
-                          </span>
-                        )}
+                        <div className="flex items-center space-x-1.5">
+                          {scanResult.table_detected && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">
+                              Table Grid Isolated
+                            </span>
+                          )}
+                          {scanResult.perspective_corrected && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
+                              Deskewed
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="rounded-xl overflow-hidden border border-slate-300 bg-slate-100 aspect-[4/3] flex items-center justify-center shadow-inner">
@@ -687,94 +727,150 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
                         </span>
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            scanResult.status === 'APPROVED'
-                              ? 'bg-emerald-100 text-emerald-700'
+                            allScoresPresent && editableStudentId && editableStudentId !== 'UNKNOWN'
+                              ? 'bg-blue-100 text-blue-700'
                               : 'bg-amber-100 text-amber-700'
                           }`}
                         >
-                          {scanResult.status}
+                          {allScoresPresent && editableStudentId && editableStudentId !== 'UNKNOWN'
+                            ? 'READY FOR APPROVAL'
+                            : 'NEEDS CORRECTION'}
                         </span>
                       </div>
 
                       {/* Student Roll No Field */}
-                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
-                        <label className="block text-[11px] font-semibold text-slate-600">
-                          Student Roll Number / Enrollment ID
-                        </label>
-                        <div className="flex items-center space-x-2">
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-semibold text-slate-600">
+                            Student Roll Number / Enrollment ID *
+                          </label>
+                          {(!editableStudentId || editableStudentId === 'UNKNOWN') && (
+                            <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
+                              Unidentified
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
                             type="text"
                             value={editableStudentId}
-                            onChange={(e) => setEditableStudentId(e.target.value)}
-                            className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-blue-500 outline-none"
+                            onChange={(e) => setEditableStudentId(e.target.value.toUpperCase())}
+                            placeholder="e.g. 2023CS0104"
+                            className={`flex-1 px-2.5 py-1.5 border rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-blue-500 outline-none ${
+                              !editableStudentId || editableStudentId === 'UNKNOWN'
+                                ? 'border-amber-400 bg-amber-50/40 text-amber-900'
+                                : 'border-slate-300 bg-white'
+                            }`}
                           />
-                          <span className="text-xs text-slate-600 font-medium">
-                            {scanResult.student_name || 'Enrolled Student'}
-                          </span>
+                          {/* Registered students dropdown fallback */}
+                          {scanResult.registered_students && scanResult.registered_students.length > 0 && (
+                            <select
+                              value={scanResult.registered_students.some((s: any) => s.student_id === editableStudentId) ? editableStudentId : ''}
+                              onChange={(e) => handleStudentSelect(e.target.value)}
+                              className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white text-slate-700 outline-none max-w-[180px] truncate"
+                            >
+                              <option value="">Select registered...</option>
+                              {scanResult.registered_students.map((st: any) => (
+                                <option key={st.student_id} value={st.student_id}>
+                                  {st.student_id} - {st.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          Enrolled: <span className="text-slate-800 font-semibold">
+                            {!editableStudentId || editableStudentId === 'UNKNOWN'
+                              ? 'Unassigned Student'
+                              : scanResult.registered_students?.find((s: any) => s.student_id === editableStudentId)?.name ||
+                                (scanResult.student_id === editableStudentId && scanResult.student_name !== 'Unknown Student'
+                                  ? scanResult.student_name
+                                  : 'Unregistered Student Roll No')}
+                          </span>
+                        </p>
                       </div>
 
                       {/* Question-Wise Scores List */}
                       <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {editableScores.map((score, idx) => (
-                          <div
-                            key={score.question_id}
-                            className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
-                              score.is_flagged
-                                ? 'border-amber-300 bg-amber-50/50'
-                                : 'border-slate-200 bg-white'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="flex items-center space-x-1.5">
-                                <span className="font-bold text-slate-800">{score.display_name}</span>
-                                <span className="text-[10px] text-slate-400 font-mono">({score.question_id})</span>
-                                {score.confidence > 0 && (
-                                  <span className="text-[10px] text-slate-500 font-medium">
-                                    • {Math.round(score.confidence * 100)}% conf
-                                  </span>
+                        {editableScores.map((score, idx) => {
+                          const isUnset = score.obtained_marks === null || score.obtained_marks === undefined;
+                          return (
+                            <div
+                              key={score.question_id}
+                              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                                score.is_flagged || isUnset
+                                  ? 'border-amber-300 bg-amber-50/50'
+                                  : 'border-slate-200 bg-white'
+                              }`}
+                            >
+                              <div className="space-y-0.5">
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="font-bold text-slate-800">{score.display_name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">({score.question_id})</span>
+                                  {score.confidence > 0 && !isUnset && (
+                                    <span className="text-[10px] text-slate-500 font-medium">
+                                      • {Math.round(score.confidence * 100)}% conf
+                                    </span>
+                                  )}
+                                  {isUnset && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200 text-amber-800">
+                                      Unrecognized
+                                    </span>
+                                  )}
+                                </div>
+                                {score.flag_reason && (
+                                  <p className="text-[10px] text-amber-700 font-medium">
+                                    {score.flag_reason}
+                                  </p>
                                 )}
                               </div>
-                              {score.flag_reason && (
-                                <p className="text-[10px] text-amber-700 font-medium">
-                                  {score.flag_reason}
-                                </p>
-                              )}
-                            </div>
 
-                            <div className="flex items-center space-x-1.5">
-                              <input
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                max={score.max_marks}
-                                value={score.obtained_marks}
-                                onChange={(e) =>
-                                  handleScoreChange(idx, parseFloat(e.target.value) || 0)
-                                }
-                                className={`w-16 px-2 py-1 text-right font-bold text-xs border rounded-lg outline-none ${
-                                  score.is_flagged
-                                    ? 'border-amber-400 focus:ring-2 focus:ring-amber-500 bg-white'
-                                    : 'border-slate-300 focus:ring-2 focus:ring-blue-500'
-                                }`}
-                              />
-                              <span className="text-slate-400 text-[11px]">/ {score.max_marks}</span>
+                              <div className="flex items-center space-x-1.5">
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  max={score.max_marks}
+                                  placeholder="—"
+                                  value={isUnset ? '' : (score.obtained_marks as number)}
+                                  onChange={(e) => {
+                                    const val = e.target.value.trim();
+                                    handleScoreChange(idx, val === '' ? null : parseFloat(val));
+                                  }}
+                                  className={`w-16 px-2 py-1 text-right font-bold text-xs border rounded-lg outline-none ${
+                                    score.is_flagged || isUnset
+                                      ? 'border-amber-400 focus:ring-2 focus:ring-amber-500 bg-amber-50/30'
+                                      : 'border-slate-300 focus:ring-2 focus:ring-blue-500 bg-white'
+                                  }`}
+                                />
+                                <span className="text-slate-400 text-[11px]">/ {score.max_marks}</span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {/* Total Marks Banner */}
-                      <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between text-xs text-blue-900">
+                      <div className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+                        allScoresPresent
+                          ? 'bg-blue-50 border-blue-100 text-blue-900'
+                          : 'bg-amber-50 border-amber-200 text-amber-900'
+                      }`}>
                         <span className="font-semibold">Calculated Total Marks:</span>
-                        <div className="flex items-baseline space-x-1">
-                          <span className="text-base font-bold text-blue-700">
-                            {currentTotalObtained}
+                        {allScoresPresent && currentTotalObtained !== null ? (
+                          <div className="flex items-baseline space-x-1">
+                            <span className="text-base font-bold text-blue-700">
+                              {currentTotalObtained}
+                            </span>
+                            <span className="text-slate-500 font-medium">
+                              / {scanResult.total_max} pts ({Math.round((currentTotalObtained / (scanResult.total_max || 1)) * 100)}%)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-bold text-amber-700 text-[11px]">
+                            Pending Verification ({editableScores.filter(s => s.obtained_marks !== null).length}/{editableScores.length} entered)
                           </span>
-                          <span className="text-slate-500 font-medium">
-                            / {scanResult.total_max} pts ({Math.round((currentTotalObtained / (scanResult.total_max || 1)) * 100)}%)
-                          </span>
-                        </div>
+                        )}
                       </div>
 
                       {/* Approval Action Buttons */}
@@ -787,11 +883,23 @@ export const ScanMarksView: React.FC<ScanMarksViewProps> = ({
                         </button>
                         <button
                           onClick={handleApproveRecord}
-                          disabled={approving}
-                          className="flex-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm inline-flex items-center justify-center space-x-2 transition-all hover:shadow"
+                          disabled={approving || !allScoresPresent || !editableStudentId || editableStudentId === 'UNKNOWN'}
+                          className={`flex-1 px-5 py-2.5 rounded-xl text-xs font-bold shadow-sm inline-flex items-center justify-center space-x-2 transition-all ${
+                            allScoresPresent && editableStudentId && editableStudentId !== 'UNKNOWN'
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white hover:shadow cursor-pointer'
+                              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          }`}
                         >
                           <Check className="h-4 w-4" />
-                          <span>{approving ? 'Committing to MongoDB...' : 'Approve & Commit Record'}</span>
+                          <span>
+                            {approving
+                              ? 'Committing to MongoDB...'
+                              : !editableStudentId || editableStudentId === 'UNKNOWN'
+                              ? 'Enter Student Roll No to Approve'
+                              : !allScoresPresent
+                              ? 'Enter All Scores to Approve'
+                              : 'Approve & Commit Record'}
+                          </span>
                         </button>
                       </div>
                     </div>

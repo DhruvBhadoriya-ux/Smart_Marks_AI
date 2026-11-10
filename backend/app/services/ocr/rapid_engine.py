@@ -41,7 +41,9 @@ class RapidOCREngine(BaseOCREngine):
         self._ensure_initialized()
         
         # RapidOCR returns: (result, elapse_list)
-        # where result is a list of [box, text, score]
+        if self._engine is None:
+            return []
+
         try:
             results, _ = self._engine(image)
         except Exception as e:

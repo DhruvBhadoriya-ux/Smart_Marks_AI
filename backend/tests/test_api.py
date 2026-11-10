@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Ensure backend root is on sys.path
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -128,3 +136,132 @@ def test_recent_activity_logs():
     # Audit log structure verification
     assert "event_type" in activities[0]
     assert "timestamp" in activities[0]
+
+
+def test_update_marks_record_and_approval():
+    from app.core.database import get_db
+    db = get_db()
+    
+    # Insert draft record with an unread score (None)
+    record_id = "REC-TEST-UPD-001"
+    draft_record = {
+        "record_id": record_id,
+        "exam_id": "EXAM-2026-CS301-MID",
+        "student_id": "UNKNOWN",
+        "student_name": "Unknown Student",
+        "scores": [
+            {"question_id": "Q1a", "display_name": "Q1(a)", "obtained_marks": None, "max_marks": 5.0, "confidence": 0.0, "is_flagged": True, "is_unrecognized": True, "is_manually_edited": False},
+            {"question_id": "Q1b", "display_name": "Q1(b)", "obtained_marks": 4.0, "max_marks": 5.0, "confidence": 0.95, "is_flagged": False, "is_unrecognized": False, "is_manually_edited": False},
+            {"question_id": "Q2", "display_name": "Q2", "obtained_marks": 8.0, "max_marks": 10.0, "confidence": 0.92, "is_flagged": False, "is_unrecognized": False, "is_manually_edited": False},
+            {"question_id": "Q3", "display_name": "Q3", "obtained_marks": 9.0, "max_marks": 10.0, "confidence": 0.94, "is_flagged": False, "is_unrecognized": False, "is_manually_edited": False},
+        ],
+        "total_obtained": None,
+        "total_max": 30.0,
+        "percentage": None,
+        "status": "NEEDS_CORRECTION",
+        "edit_history": [],
+        "created_at": "2026-10-29T12:00:00Z",
+        "updated_at": "2026-10-29T12:00:00Z",
+    }
+    db.marks_records.update_one({"record_id": record_id}, {"$set": draft_record}, upsert=True)
+
+    # 1. Update: Faculty provides student ID 2023CS0104 and fills in missing Q1(a) score: 4.5
+    updated_scores = [
+        {"question_id": "Q1a", "display_name": "Q1(a)", "obtained_marks": 4.5, "max_marks": 5.0, "confidence": 1.0, "is_flagged": False, "is_manually_edited": True},
+        {"question_id": "Q1b", "display_name": "Q1(b)", "obtained_marks": 4.0, "max_marks": 5.0, "confidence": 0.95, "is_flagged": False, "is_manually_edited": False},
+        {"question_id": "Q2", "display_name": "Q2", "obtained_marks": 8.0, "max_marks": 10.0, "confidence": 0.92, "is_flagged": False, "is_manually_edited": False},
+        {"question_id": "Q3", "display_name": "Q3", "obtained_marks": 9.0, "max_marks": 10.0, "confidence": 0.94, "is_flagged": False, "is_manually_edited": False},
+    ]
+    update_payload = {
+        "scores": updated_scores,
+        "student_id": "2023CS0104",
+        "faculty_id": "FAC001",
+        "reason": "Faculty entered missing Q1(a) score and assigned student"
+    }
+
+    put_res = client.put(f"/api/v1/marks/record/{record_id}", json=update_payload)
+    assert put_res.status_code == 200
+    res_data = put_res.json()
+    assert res_data["student_id"] == "2023CS0104"
+    assert res_data["total_obtained"] == 25.5
+    assert res_data["percentage"] == 85.0
+    assert len(res_data["edit_history"]) >= 1
+
+    # 2. Approve record
+    appr_res = client.post(f"/api/v1/marks/record/{record_id}/approve", json={"faculty_id": "FAC001", "approval_notes": "All verified"})
+    assert appr_res.status_code == 200
+    assert appr_res.json()["status"] == "APPROVED"
+    assert appr_res.json()["approved_by"] == "FAC001"
+
+
+def test_approve_rejected_if_incomplete_or_unknown_student():
+    from app.core.database import get_db
+    db = get_db()
+
+    # Draft with UNKNOWN student
+    rec_unknown = "REC-TEST-UNKNOWN-001"
+    db.marks_records.update_one(
+        {"record_id": rec_unknown},
+        {"$set": {
+            "record_id": rec_unknown,
+            "exam_id": "EXAM-2026-CS301-MID",
+            "student_id": "UNKNOWN",
+            "scores": [{"question_id": "Q1a", "display_name": "Q1(a)", "obtained_marks": 5.0, "max_marks": 5.0}],
+            "total_obtained": 5.0,
+            "total_max": 5.0,
+            "status": "NEEDS_CORRECTION",
+            "created_at": "2026-10-29T12:00:00Z",
+            "updated_at": "2026-10-29T12:00:00Z"
+        }},
+        upsert=True
+    )
+
+    res1 = client.post(f"/api/v1/marks/record/{rec_unknown}/approve", json={"faculty_id": "FAC001"})
+    assert res1.status_code == 400
+    assert "UNKNOWN" in res1.json()["detail"]
+
+    # Draft with missing question mark
+    rec_incomplete = "REC-TEST-INCOMPLETE-001"
+    db.marks_records.update_one(
+        {"record_id": rec_incomplete},
+        {"$set": {
+            "record_id": rec_incomplete,
+            "exam_id": "EXAM-2026-CS301-MID",
+            "student_id": "2023CS0105",
+            "scores": [{"question_id": "Q1a", "display_name": "Q1(a)", "obtained_marks": None, "max_marks": 5.0}],
+            "total_obtained": None,
+            "total_max": 5.0,
+            "status": "NEEDS_CORRECTION",
+            "created_at": "2026-10-29T12:00:00Z",
+            "updated_at": "2026-10-29T12:00:00Z"
+        }},
+        upsert=True
+    )
+
+    res2 = client.post(f"/api/v1/marks/record/{rec_incomplete}/approve", json={"faculty_id": "FAC001"})
+    assert res2.status_code == 400
+    assert "no marks assigned" in res2.json()["detail"]
+
+
+def test_multiple_unknown_marks_records_coexistence():
+    from app.core.database import get_db
+    db = get_db()
+
+    # Verify multiple records with UNKNOWN student for the same exam do not trigger DuplicateKeyError
+    rec_a = {"record_id": "REC-UNK-A", "exam_id": "EXAM-2026-CS301-MID", "student_id": "UNKNOWN", "status": "NEEDS_CORRECTION"}
+    rec_b = {"record_id": "REC-UNK-B", "exam_id": "EXAM-2026-CS301-MID", "student_id": "UNKNOWN", "status": "NEEDS_CORRECTION"}
+
+    db.marks_records.insert_one(rec_a)
+    db.marks_records.insert_one(rec_b)
+
+    found_a = db.marks_records.find_one({"record_id": "REC-UNK-A"})
+    found_b = db.marks_records.find_one({"record_id": "REC-UNK-B"})
+    assert found_a is not None
+    assert found_b is not None
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+
+
+

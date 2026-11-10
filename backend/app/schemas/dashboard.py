@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel
 from app.schemas.exam import ExamResponse
 from app.schemas.activity import AuditEventResponse
